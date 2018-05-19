@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System;
 
 using System.Runtime.Serialization.Formatters.Binary;
-using System.IO;
 
 public class Utils
 {
@@ -261,25 +260,25 @@ public class Utils
 
 	static public string LoadJsonFromFile(string filename)
 	{
-		string path = Application.dataPath + "/Resources/Data/" + filename + ".txt";
 		string text;
-		
-		// try to load first from the filesystem, otherwise use a textasset
-		// this allows modding, but also allows us to make a webplayer
-		if(false)//File.Exists(path))
 		{
-		    var streamReader = new StreamReader(path, Encoding.UTF8);
-			text = streamReader.ReadToEnd();
-			streamReader.Close();
+			string path = $"{ Application.dataPath }/Resources/Data/{ filename }.txt";
+			// try to load first from the filesystem, otherwise use a textasset
+			// this allows modding, but also allows us to make a webplayer
+			if(false)//File.Exists(path))
+			{
+				var streamReader = new StreamReader(path, Encoding.UTF8);
+				text = streamReader.ReadToEnd();
+				streamReader.Close();
+			}
+			else
+			{
+				var textAsset = Resources.Load("Data/" + filename) as TextAsset;
+				if(textAsset == null)
+					throw new IOException("File not found: "+ filename);
+				text = textAsset.text;
+			}
 		}
-		else
-		{
-			var textAsset = Resources.Load("Data/" + filename) as TextAsset;
-			if(textAsset == null)
-				throw new IOException("File not found: "+ filename);
-			text = textAsset.text;
-		}
-		
 		return text;
 	}
 	
@@ -364,10 +363,11 @@ public class Utils
 	// these two lists serves as building blocks to construt any number
 	// just like coin denominations.
 	// 1000->"M", 900->"CM", 500->"D"...keep on going 
+	/*
 	static int[] decimalDens={1000,900,500,400,100,90,50,40,10,9,5,4,1};
 	static string[] romanDens={"M","CM","D","CD","C","XC","L","XL","X","IX","V","IV","I"};
 	
-/*
+
 def toRoman(dec):
 	"""
 	Perform sanity check on decimal and throws exceptions when necessary
@@ -529,7 +529,7 @@ def decToRoman(num,s,decs,romans):
         List<string> wrappedLines = new List<string>();
 
         StringBuilder actualLine = new StringBuilder();
-        double actualWidth = 0;
+        //double actualWidth = 0;
 
         foreach (var item in originalLines)
         {
@@ -654,7 +654,7 @@ def decToRoman(num,s,decs,romans):
 	        return current;
 	 
 	    // search through child bones for the bone we're looking for
-	    for (int i = 0; i < current.GetChildCount(); ++i)
+	    for (int i = 0; i < current.childCount ; ++i)
 	    {
 	        // the recursive step; repeat the search one step deeper in the hierarchy
 	        Transform found = FindInHierarchy(current.GetChild(i), name);

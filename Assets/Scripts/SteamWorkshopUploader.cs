@@ -55,7 +55,7 @@ public class SteamWorkshopUploader : MonoBehaviour
 
         if(SteamManager.m_steamAppId == 0)
         {
-            string error = "ERROR: Steam App ID isn't set! Make sure 'steam_appid.txt' is placed next to the executable file, and contains a single line with the app id.";
+            Debug.LogError( "ERROR: Steam App ID isn't set! Make sure 'steam_appid.txt' is placed next to the executable file, and contains a single line with the app id." , this );
         }
 
         RefreshPackList();
@@ -560,4 +560,5 @@ public class WorkshopModPack
 
         Debug.Log("Saved modpack to file: " + filename);
     }
+    
 }
