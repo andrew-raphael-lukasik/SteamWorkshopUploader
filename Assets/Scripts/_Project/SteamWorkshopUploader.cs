@@ -1,13 +1,18 @@
-﻿using UnityEngine;
-using UnityEngine.UI;
+﻿using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+
+using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.Networking;
+using UnityEngine.Assertions;
 
 using Steamworks;
-using TinyJSON;
 
 namespace Project
 {
+    [DisallowMultipleComponent]
     public class SteamWorkshopUploader : MonoBehaviour
     {
         #region FIELDS
@@ -50,13 +55,13 @@ namespace Project
         #endregion
         #region MONOBEHAVIOUR METHODS
 
-        void Awake()
+        void Awake ()
         {
             SetupDirectories();
-
+            
             //make sure at least default steam_appid file exists:
             {
-                string appidFilePath = string.Format( "{0}/../steam_appid.txt" , Application.dataPath );
+                string appidFilePath = Application.dataPath + "/../steam_appid.txt";
                 if( File.Exists( appidFilePath )==false )
                 {
                     StreamWriter writer = null;
@@ -80,16 +85,17 @@ namespace Project
                     }
                 }
             }
+
         }
 
-        void Start()
+        void Start ()
         {
-            versionText.text = string.Format( "Steam Workshop Uploader - Build {0} --- App ID: {1}" , version , SteamManager.m_steamAppId );
+            versionText.text = string.Format( "Steam Workshop Uploader - Build {0} --- App ID: {1}" , version , SteamUtils.GetAppID() );
 
-            if( SteamManager.m_steamAppId==0 )
+            if( SteamUtils.GetAppID()==AppId_t.Invalid )
             {
                 Debug.LogError( "ERROR: Steam App ID isn't set! Make sure 'steam_appid.txt' is placed next to the executable file, and contains a single line with the app id." , this );
-            }
+            } 
 
             RefreshPackList();
             RefreshCurrentModPack();
@@ -97,9 +103,6 @@ namespace Project
 
         void OnEnable ()
         {
-            basePath = string.Format( "{0}{1}" , Application.dataPath ,  relativeBasePath );
-            Debug.Log( string.Format( "basePath is: {0}" , basePath ) );
-            
             if( SteamManager.Initialized )
             {
                 m_NumberOfCurrentPlayers = CallResult<NumberOfCurrentPlayers_t>.Create(OnNumberOfCurrentPlayers);
@@ -142,7 +145,7 @@ namespace Project
 
         void OnApplicationQuit ()
         {
-            if (currentPack != null)
+            if( currentPack!=null )
             {
                 OnCurrentModPackChanges();
                 SaveCurrentModPack();
@@ -154,25 +157,14 @@ namespace Project
         {
             RefreshPackList();
 
-            if(currentPack != null)
+            if( currentPack!=null )
             {
                 RefreshCurrentModPack();
             }
         }
 
         #endregion
-        #region PRIVATE METHODS
-
-
-
-        #endregion
-        #region PUBLIC METHODS
-
-
-
-        #endregion
-        
-        
+        #region PUBLIC METHODS        
 
         public void Shutdown()
         {
@@ -181,12 +173,22 @@ namespace Project
 
         void SetupDirectories ()
         {
-            basePath = string.Format( "{0}{1}" , Application.dataPath , relativeBasePath );
+            basePath = Application.dataPath + relativeBasePath;
+
+            #if DEBUG
+            //Debug.Log( string.Format( " Application.dataPath: {0}" ,  Application.dataPath ) );
+            //Debug.Log( string.Format( " relativeBasePath: {0}" ,  relativeBasePath ) );
+            Assert.IsTrue( basePath.Length>1 && basePath[1]==':' );
+            #endif
 
             if( !Directory.Exists( basePath ) )
             {
                 Directory.CreateDirectory( basePath );
             }
+
+            #if DEBUG
+            Debug.Log( string.Format( "basePath is: {0}" , basePath ) );
+            #endif
         }
 
         public string[] GetPackFilenames ()
@@ -223,12 +225,10 @@ namespace Project
                 
                 if( button!=null )
                 {
-                    // sneaky weirdness required here!
-                    // see: http://answers.unity3d.com/questions/791573/46-ui-how-to-apply-onclick-handler-for-button-gene.html
-                    //int buttonNumber = i;
                     string fileName = packPath;
-                    //var e = new MenuButtonEvent(gameObject.name, buttonNumber);
-                    button.onClick.AddListener(() => { SelectModPack(fileName); });
+                    button.onClick.AddListener(
+                        () => { SelectModPack( fileName ); }
+                    );
                 }
             }
         }
@@ -249,7 +249,7 @@ namespace Project
                 "Submit {0}" ,
                 Path.GetFileNameWithoutExtension( filename.Replace( ".workshop" , string.Empty ) )
             );
-            modPackContents.text = JSON.Dump( currentPack , true );
+            modPackContents.text = JsonUtility.ToJson( currentPack , true );
 
             RefreshPreview();
 
@@ -261,7 +261,7 @@ namespace Project
             modPackVisibility.value = currentPack.visibility;
         }
         
-        public void SelectModPack( string filename )
+        public void SelectModPack ( string filename )
         {
             if( currentPack!=null )
             {
@@ -288,11 +288,35 @@ namespace Project
 
         public void RefreshPreview ()
         {
-            string path = basePath + currentPack.previewfile;
+            //create full file path
+            string filePath = basePath + currentPack.previewfile;
+
+            //test assertions:
+            if( currentPack.previewfile==null )
+            {
+                Debug.LogError( $"{ nameof(currentPack) }.{ nameof(currentPack.previewfile) } is null" );
+                modPackPreview.texture = null;
+                return;
+            }
+            else if( currentPack.previewfile.Length==0 )
+            {
+                Debug.LogError( $"pack { nameof(currentPack.previewfile) } is empty" );
+                modPackPreview.texture = null;
+                return;
+            }
             
-            // NOTE : intentionally set texture to null if no texture is found
-            var preview = Utils.LoadTextureFromFile( path );
-            modPackPreview.texture = preview;
+            //if there is no preview image then copy default one here:
+            if( File.Exists( filePath )==false )
+            {
+                File.Copy(
+                    Application.streamingAssetsPath + "/templates/512px-512px.png" ,
+                    filePath,
+                    false
+                );
+            }
+
+            //read texture file:
+            modPackPreview.texture = FILE.ReadTexture2D( filePath );
         }
 
         public bool ValidateModPack ( WorkshopModPack pack )
@@ -338,17 +362,34 @@ namespace Project
             }
             else
             {
-                string filename = string.Format( "{0}{1}.workshop.json" , basePath , packName );
+                string packJsonFilePath = string.Format(
+                    "{0}.workshop.json",
+                    basePath + packName
+                );
 
                 var pack = new WorkshopModPack();
-                pack.Save( filename );
+                pack.Save( packJsonFilePath );
 
-                pack.contentfolder = modPackName.text;
-                Directory.CreateDirectory( basePath + modPackName.text );
+                //determine paths:
+                var contentRelPath = modPackName.text;
+                var contentAbsPath = basePath + contentRelPath;
+
+                //
+                pack.contentfolder = contentRelPath;
+
+                //create content directory:
+                Directory.CreateDirectory( contentAbsPath );
+
+                //create first file:
+                File.Copy(
+                    Application.streamingAssetsPath + "/templates/hello_steam.txt",
+                    contentAbsPath + "/hello_steam.txt",
+                    false
+                );
                 
                 RefreshPackList();
 
-                SelectModPack( filename );
+                SelectModPack( packJsonFilePath );
 
                 CreateWorkshopItem();
             }
@@ -376,23 +417,29 @@ namespace Project
             }
         }
 
-        void CreateWorkshopItem()
+        #endregion
+        #region PRIVATE METHODS
+
+        void CreateWorkshopItem ()
         {
-            if (string.IsNullOrEmpty(currentPack.publishedfileid))
+            if( string.IsNullOrEmpty( currentPack.publishedfileid ) )
             {
-                SteamAPICall_t call = SteamUGC.CreateItem(new AppId_t(SteamManager.m_steamAppId), Steamworks.EWorkshopFileType.k_EWorkshopFileTypeCommunity);
+                SteamAPICall_t call = SteamUGC.CreateItem(
+                     SteamUtils.GetAppID(),
+                    Steamworks.EWorkshopFileType.k_EWorkshopFileTypeCommunity
+                );
                 m_itemCreated.Set(call);
 
                 statusText.text = "Creating new item...";
             }
         }
 
-        void UploadModPack(WorkshopModPack pack)
+        void UploadModPack ( WorkshopModPack pack )
         {
-            ulong ulongId = ulong.Parse(pack.publishedfileid);
+            ulong ulongId = ulong.Parse( pack.publishedfileid );
             var id = new PublishedFileId_t(ulongId);
 
-            UGCUpdateHandle_t handle = SteamUGC.StartItemUpdate(new AppId_t(SteamManager.m_steamAppId), id);
+            UGCUpdateHandle_t handle = SteamUGC.StartItemUpdate(  SteamUtils.GetAppID() , id );
             //m_itemUpdated.Set(call);
             //OnItemUpdated(call, false);
 
@@ -400,27 +447,46 @@ namespace Project
             pack.changenote = modPackChangeNotes.text;
 
             currentHandle = handle;
-            SetupModPack(handle, pack);
-            SubmitModPack(handle, pack);
+            SetupModPack( handle , pack );
+            SubmitModPack( handle , pack );
         }
 
-        void SetupModPack(UGCUpdateHandle_t handle, WorkshopModPack pack)
+        void SetupModPack ( UGCUpdateHandle_t handle , WorkshopModPack pack )
         {
-            SteamUGC.SetItemTitle(handle, pack.title);
-            SteamUGC.SetItemDescription(handle, pack.description);
-            SteamUGC.SetItemVisibility(handle, (ERemoteStoragePublishedFileVisibility)pack.visibility);
-            SteamUGC.SetItemContent(handle, basePath + pack.contentfolder);
-            SteamUGC.SetItemPreview(handle, basePath + pack.previewfile);
-            SteamUGC.SetItemMetadata(handle, pack.metadata);
-
-            pack.ValidateTags();
-            SteamUGC.SetItemTags(handle, pack.tags);
+            SteamUGC.SetItemTitle(
+                handle,
+                pack.title
+            );
+            SteamUGC.SetItemDescription(
+                handle,
+                pack.description
+            );
+            SteamUGC.SetItemVisibility(
+                handle,
+                (ERemoteStoragePublishedFileVisibility)pack.visibility
+            );
+            SteamUGC.SetItemContent(
+                handle,
+                basePath + pack.contentfolder
+            );
+            SteamUGC.SetItemPreview(
+                handle,
+                basePath + pack.previewfile
+            );
+            SteamUGC.SetItemMetadata(
+                handle,
+                pack.metadata
+            );
+            SteamUGC.SetItemTags(
+                handle,
+                pack.tags
+            );
         }
 
-        void SubmitModPack(UGCUpdateHandle_t handle, WorkshopModPack pack)
+        void SubmitModPack( UGCUpdateHandle_t handle , WorkshopModPack pack )
         {
-            SteamAPICall_t call = SteamUGC.SubmitItemUpdate(handle, pack.changenote);
-            m_itemSubmitted.Set(call);
+            SteamAPICall_t call = SteamUGC.SubmitItemUpdate( handle , pack.changenote );
+            m_itemSubmitted.Set( call );
             //In the same way as Creating a Workshop Item, confirm the user has accepted the legal agreement. This is necessary in case where the user didn't initially create the item but is editing an existing item.
         }
 
@@ -494,22 +560,32 @@ namespace Project
             }
         }
 
-        void UpdateProgressBar(UGCUpdateHandle_t handle)
+        void UpdateProgressBar ( UGCUpdateHandle_t handle )
         {
             ulong bytesDone;
             ulong bytesTotal;
-            EItemUpdateStatus status = SteamUGC.GetItemUpdateProgress(handle, out bytesDone, out bytesTotal);
+            EItemUpdateStatus status = SteamUGC.GetItemUpdateProgress( handle , out bytesDone , out bytesTotal );
 
             float progress = (float)bytesDone / (float)bytesTotal;
             progressBar.value = progress;
 
-            switch(status)
+            switch( status )
             {
                 case EItemUpdateStatus.k_EItemUpdateStatusCommittingChanges:
                     statusText.text = "Committing changes...";
                     break;
                 case EItemUpdateStatus.k_EItemUpdateStatusInvalid:
-                    statusText.text = "Item invalid ... dunno why! :(";
+                    {
+                        int numContentFiles = System.IO.Directory.GetFiles( currentPack.filename ).Length;
+                        if( numContentFiles==0 )
+                        {
+                            statusText.text = "Item invalid. Make sure your mod contains at leats one file.";
+                        } 
+                        else
+                        {
+                            statusText.text = "Item invalid. No idea why. Google \"steam workshop k_EItemUpdateStatusInvalid\"";
+                        }
+                    }
                     break;
                 case EItemUpdateStatus.k_EItemUpdateStatusUploadingPreviewFile:
                     statusText.text = "Uploading preview image...";
@@ -528,7 +604,7 @@ namespace Project
         }
 
 
-        private CallResult<NumberOfCurrentPlayers_t> m_NumberOfCurrentPlayers;
+        CallResult<NumberOfCurrentPlayers_t> m_NumberOfCurrentPlayers;
 
         void OnNumberOfCurrentPlayers(NumberOfCurrentPlayers_t pCallback, bool bIOFailure)
         {
@@ -542,87 +618,49 @@ namespace Project
             }
         }
 
-    }
+        #endregion
+        #region NESTED TYPES
 
-    [System.Serializable]
-    public class Config
-    {
-        public bool validateTags = false;
-        public List<string> validTags = new List<string>();
-
-        [TinyJSON.Skip]
-        public const string filename = "config.json";
-
-        public static Config Load()
+        [System.Serializable]
+        public class WorkshopModPack
         {
-            Config obj = null;
-            string jsonString = Utils.LoadTextFile(Application.dataPath + "/../" + filename);
-            JSON.MakeInto<Config>(JSON.Load(jsonString), out obj);
+            // gets populated when the modpack is loaded; shouldn't be serialized since it would go out of sync
+            [System.NonSerialized] public string filename;
 
-            return obj;
-        }
-    }
+            // populated by the app, should generally be different each time anyways
+            [System.NonSerialized] public string changenote = "Version 1.0";
+            
+            // string, because this is a ulong and JSON doesn't like em
+            public string publishedfileid = "";
+            public string contentfolder = "";
+            public string previewfile = "";
+            public int visibility = 0;//first upload is always hidden
+            public string title = "My New Mod Pack";
+            public string description = "Description goes here";
+            public string metadata = "";
+            public List<string> tags = new List<string>();
 
-    [System.Serializable]
-    public class WorkshopModPack
-    {
-        // gets populated when the modpack is loaded; shouldn't be serialized since it would go out of sync
-        [TinyJSON.Skip]
-        public string filename;
-
-        // populated by the app, should generally be different each time anyways
-        [TinyJSON.Skip]
-        public string changenote = "Version 1.0";
-        
-        // string, because this is a ulong and JSON doesn't like em
-        public string publishedfileid = "";
-        public string contentfolder = "";
-        public string previewfile = "";
-        public int visibility = 2;          // hidden by default!
-        public string title = "My New Mod Pack";
-        public string description = "Description goes here";
-        public string metadata = "";
-        public List<string> tags = new List<string>();
-
-        public void ValidateTags()
-        {
-            var config = Config.Load();
-
-            if(!config.validateTags)
+            public static WorkshopModPack Load( string filePath )
             {
-                return;
+                string json = FILE.ReadText( filePath );
+                WorkshopModPack pack = JsonUtility.FromJson<WorkshopModPack>( json );
+                pack.filename = filePath;
+                return pack;
             }
 
-            for (int i = 0; i < tags.Count; i++)
+            public void Save ( string filePath )
             {
-                // get rid of tags that aren't valid
-                if (!config.validTags.Contains(tags[i]))
-                {
-                    Debug.LogError("Removing invalid tag: " + tags[i]);
-                    tags.RemoveAt(i);
-                    i--;
-                }
+                string json = JsonUtility.ToJson( this , true );
+                FILE.WriteText( filePath , json );
+
+                #if DEBUG
+                Debug.Log( string.Format( "Saved modpack to file: {0}" , filePath ) );
+                #endif
             }
+            
         }
 
-        public static WorkshopModPack Load(string filename)
-        {
-            WorkshopModPack pack = null;
-            string jsonString = Utils.LoadTextFile(filename);
-            JSON.MakeInto<WorkshopModPack>(JSON.Load(jsonString), out pack);
-
-            pack.filename = filename;
-
-            return pack;
-        }
-
-        public void Save(string filename)
-        {
-            string jsonString = JSON.Dump(this, true);
-            Utils.SaveJsonToFile(filename, jsonString);
-
-            Debug.Log("Saved modpack to file: " + filename);
-        }
-        
+        #endregion
     }
+    
 }
