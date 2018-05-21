@@ -109,6 +109,37 @@ namespace Project
             }
         }
 
+        void Update ()
+        {
+            //?
+            if( Input.GetKeyDown(KeyCode.F1) )
+            {
+                SteamAPICall_t handle = SteamUserStats.GetNumberOfCurrentPlayers();
+                m_NumberOfCurrentPlayers.Set(handle);
+                Debug.Log("Called GetNumberOfCurrentPlayers()");
+            }
+
+            //refresh progres bar:
+            if( currentHandle!=UGCUpdateHandle_t.Invalid )
+            {
+                UpdateProgressBar( currentHandle );
+            }
+            else
+            {
+                progressBar.value = 0f;
+            }
+            
+            //help unity enforce 4:3 aspect ratio
+            {
+                #if UNITY_STANDALONE
+                if( (Screen.width/Screen.height) != 4f/3f )
+                {
+                    Screen.SetResolution( Screen.width , (int)(Screen.width * 3f/4f) , false , 10 );
+                }
+                #endif
+            }
+        }
+
         void OnApplicationQuit ()
         {
             if (currentPack != null)
@@ -511,24 +542,6 @@ namespace Project
             }
         }
 
-        void Update ()
-        {
-            if (Input.GetKeyDown(KeyCode.F1))
-            {
-                SteamAPICall_t handle = SteamUserStats.GetNumberOfCurrentPlayers();
-                m_NumberOfCurrentPlayers.Set(handle);
-                Debug.Log("Called GetNumberOfCurrentPlayers()");
-            }
-
-            if(currentHandle != UGCUpdateHandle_t.Invalid)
-            {
-                UpdateProgressBar(currentHandle);
-            }
-            else
-            {
-                progressBar.value = 0f;
-            }
-        }
     }
 
     [System.Serializable]
