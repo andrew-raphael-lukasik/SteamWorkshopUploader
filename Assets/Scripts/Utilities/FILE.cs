@@ -41,7 +41,7 @@ public static class FILE
 		return output;
     }
 
-    public static Texture2D ReadTexture2D ( string filePath )
+    public static Texture2D ReadTexture ( string filePath )
     {
         if( File.Exists( filePath ) )
         {

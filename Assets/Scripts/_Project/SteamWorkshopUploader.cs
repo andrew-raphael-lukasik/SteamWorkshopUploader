@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading;
+using System.Threading.Tasks;
 
 using UnityEngine;
 using UnityEngine.UI;
@@ -105,10 +106,10 @@ namespace Project
         {
             if( SteamManager.Initialized )
             {
-                m_NumberOfCurrentPlayers = CallResult<NumberOfCurrentPlayers_t>.Create(OnNumberOfCurrentPlayers);
+                m_NumberOfCurrentPlayers = CallResult<NumberOfCurrentPlayers_t>.Create( OnNumberOfCurrentPlayers );
 
-                m_itemCreated = CallResult<CreateItemResult_t>.Create(OnItemCreated);
-                m_itemSubmitted = CallResult<SubmitItemUpdateResult_t>.Create(OnItemSubmitted);
+                m_itemCreated = CallResult<CreateItemResult_t>.Create( OnItemCreated );
+                m_itemSubmitted = CallResult<SubmitItemUpdateResult_t>.Create( OnItemSubmitted );
             }
         }
 
@@ -246,7 +247,7 @@ namespace Project
             var filename = currentPack.filename;
 
             submitButtonText.text = string.Format(
-                "Submit {0}" ,
+                "SUBMIT \'{0}\' FILES" ,
                 Path.GetFileNameWithoutExtension( filename.Replace( ".workshop" , string.Empty ) )
             );
             modPackContents.text = JsonUtility.ToJson( currentPack , true );
@@ -288,51 +289,118 @@ namespace Project
 
         public void RefreshPreview ()
         {
-            //create full file path
-            string filePath = basePath + currentPack.previewfile;
+            //is previewfile field even filled:
+            if( currentPack.previewfile!=null && currentPack.previewfile.Length!=0 )
+            {
+                //create full file path
+                string filePath = basePath + currentPack.previewfile;
+                
+                //if there is no preview image then copy default one here:
+                if( File.Exists( filePath )==false )
+                {
+                    File.Copy(
+                        Application.streamingAssetsPath + "/512px-512px.png" ,
+                        filePath,
+                        false
+                    );
+                }
 
-            //test assertions:
-            if( currentPack.previewfile==null )
+                //read texture file:
+                modPackPreview.texture = FILE.ReadTexture( filePath );
+            }
+            else
             {
-                Debug.LogError( $"{ nameof(currentPack) }.{ nameof(currentPack.previewfile) } is null" );
+                //no image specified
                 modPackPreview.texture = null;
-                return;
             }
-            else if( currentPack.previewfile.Length==0 )
-            {
-                Debug.LogError( $"pack { nameof(currentPack.previewfile) } is empty" );
-                modPackPreview.texture = null;
-                return;
-            }
-            
-            //if there is no preview image then copy default one here:
-            if( File.Exists( filePath )==false )
-            {
-                File.Copy(
-                    Application.streamingAssetsPath + "/templates/512px-512px.png" ,
-                    filePath,
-                    false
-                );
-            }
+        }
 
-            //read texture file:
-            modPackPreview.texture = FILE.ReadTexture2D( filePath );
+        public void SubmitPreviewFile ()
+        {
+            SteamUGC.UpdateItemPreviewFile(
+                currentHandle,
+                0,
+                basePath + currentPack.previewfile
+            );
+        }
+
+        public void SubmitDescription ()
+        {
+            SteamUGC.SetItemDescription(
+                currentHandle,
+                modPackDescription.text
+            );
         }
 
         public bool ValidateModPack ( WorkshopModPack pack )
         {
-            statusText.text = "Validating mod pack...";
-
-            string path = basePath + pack.previewfile;
-
-            var info = new FileInfo( path );
-            if( info.Length >= 1024 * 1024 )
+            try
             {
-                statusText.text = "ERROR: Preview file must be <1MB!";
+                statusText.text = "Validating mod pack...";
+
+                //validate preview image:
+                {
+                    string previewFileAbsPath = basePath + pack.previewfile;
+
+                    //workshop.json entry:
+                    if( pack.previewfile==null || pack.previewfile.Length==0 )
+                    {
+                        statusText.text = "ERROR: preview file name is empty in modName.workshop.json";
+                        return false;
+                    }
+
+                    //if there is no preview image then copy default one here:
+                    {
+                        if( File.Exists( previewFileAbsPath )==false )
+                        {
+                            statusText.text = "ERROR: Preview file name in modName.workshop.json doesn't match any file";
+                            return false;
+                        }
+                    }
+
+                    //file size:
+                    var info = new FileInfo( previewFileAbsPath );
+                    if( info.Length >= 1024 * 1024 )
+                    {
+                        statusText.text = "ERROR: Preview file must be <1MB!";
+                        return false;
+                    }
+                }
+
+                //validate content directory:
+                {
+                    //it exists:
+                    if( Directory.Exists( basePath + pack.contentfolder )==false )
+                    {
+                        statusText.text = "ERROR: mod directory not found!";
+                        return false;
+                    }
+
+                    //at least single file exist:
+                    {
+                        int numContentFiles = Directory.GetFiles( basePath + pack.contentfolder ).Length;
+                        if( numContentFiles==0 )
+                        {
+                            statusText.text = "ERROR: Make sure your mod contains at leats one file!";
+                            return false;
+                        }
+                    }
+                }
+
+                statusText.text = "No problem found, so far";
+                return true;
+            }
+            catch ( System.Exception ex )
+            {
+                Debug.LogException( ex );
+                statusText.text = "EXCEPTION:"+ex.ToString();
                 return false;
             }
+        }
 
-            return true;
+        public void ValidateCurrentModPack ()
+        {
+            ValidateModPack( currentPack );
         }
 
         public void OnCurrentModPackChanges ()
@@ -351,7 +419,7 @@ namespace Project
             pack.visibility = modPackVisibility.value;
         }
 
-        public void AddModPack ()
+        public void CreateModPack ()
         {
             var packName = modPackName.text;
 
@@ -362,36 +430,22 @@ namespace Project
             }
             else
             {
-                string packJsonFilePath = string.Format(
-                    "{0}.workshop.json",
-                    basePath + packName
-                );
+                string packJsonFilePath = basePath + packName + ".workshop.json";
 
                 var pack = new WorkshopModPack();
+                pack.contentfolder = packName;
                 pack.Save( packJsonFilePath );
 
                 //determine paths:
                 var contentRelPath = modPackName.text;
                 var contentAbsPath = basePath + contentRelPath;
 
-                //
-                pack.contentfolder = contentRelPath;
-
                 //create content directory:
                 Directory.CreateDirectory( contentAbsPath );
 
-                //create first file:
-                File.Copy(
-                    Application.streamingAssetsPath + "/templates/hello_steam.txt",
-                    contentAbsPath + "/hello_steam.txt",
-                    false
-                );
-                
                 RefreshPackList();
 
                 SelectModPack( packJsonFilePath );
-
-                CreateWorkshopItem();
             }
         }
         
@@ -405,14 +459,15 @@ namespace Project
 
         public void SubmitCurrentModPack ()
         {
-            if (currentPack != null)
+            if( currentPack!=null )
             {
-                OnChanges(currentPack);
+                OnChanges( currentPack );
                 SaveCurrentModPack();
                 
-                if (ValidateModPack(currentPack))
+                if( ValidateModPack(currentPack) )
                 {
-                    UploadModPack(currentPack);
+                    CreateWorkshopItem();
+                    UploadModPack( currentPack );
                 }
             }
         }
@@ -425,11 +480,11 @@ namespace Project
             if( string.IsNullOrEmpty( currentPack.publishedfileid ) )
             {
                 SteamAPICall_t call = SteamUGC.CreateItem(
-                     SteamUtils.GetAppID(),
+                    SteamUtils.GetAppID(),
                     Steamworks.EWorkshopFileType.k_EWorkshopFileTypeCommunity
                 );
-                m_itemCreated.Set(call);
-
+                m_itemCreated.Set( call );
+                
                 statusText.text = "Creating new item...";
             }
         }
@@ -483,7 +538,7 @@ namespace Project
             );
         }
 
-        void SubmitModPack( UGCUpdateHandle_t handle , WorkshopModPack pack )
+        void SubmitModPack ( UGCUpdateHandle_t handle , WorkshopModPack pack )
         {
             SteamAPICall_t call = SteamUGC.SubmitItemUpdate( handle , pack.changenote );
             m_itemSubmitted.Set( call );
@@ -543,15 +598,15 @@ namespace Project
             }
         }
 
-        void OnItemSubmitted(SubmitItemUpdateResult_t callback, bool ioFailure)
+        void OnItemSubmitted ( SubmitItemUpdateResult_t callback , bool ioFailure )
         {
-            if (ioFailure)
+            if( ioFailure )
             {
                 statusText.text = "Error: I/O Failure! :(";
                 return;
             }
 
-            switch(callback.m_eResult)
+            switch( callback.m_eResult )
             {
                 case EResult.k_EResultOK:
                     statusText.text = "SUCCESS! Item submitted! :D :D :D";
@@ -576,14 +631,14 @@ namespace Project
                     break;
                 case EItemUpdateStatus.k_EItemUpdateStatusInvalid:
                     {
-                        int numContentFiles = System.IO.Directory.GetFiles( currentPack.filename ).Length;
+                        int numContentFiles = Directory.GetFiles(  basePath + currentPack.contentfolder ).Length;
                         if( numContentFiles==0 )
                         {
                             statusText.text = "Item invalid. Make sure your mod contains at leats one file.";
                         } 
                         else
                         {
-                            statusText.text = "Item invalid. No idea why. Google \"steam workshop k_EItemUpdateStatusInvalid\"";
+                            statusText.text = $"Item invalid. No idea why. Google \"steam workshop { nameof(EItemUpdateStatus) }.{ nameof(EItemUpdateStatus.k_EItemUpdateStatusInvalid) }\"";
                         }
                     }
                     break;
